@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, AlertCircle, Zap, FileText, BookOpen, FilePlus, Mic, } from 'lucide-react';
+import { Send, AlertCircle, Zap, FileText, BookOpen, FilePlus, Mic, Menu } from 'lucide-react';
 import { geminiModel, analyzeLegalDocument } from '../lib/gemini';
 import CaseLawResults from './CaseLawResults';
-// import FileUploadPreview from './FileUploadPreview';
 import LegalDraftingPanel from './LegalDraftingPanel';
 import WebSearchResults from './WebSearchResults';
+import Sidebar from './Sidebar'
+import FamousCases from './FamousCases'
 import { legalTemplateButton } from '../data/mockData';
 import { Message, UploadedFile } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,11 +26,41 @@ export function AIChat() {
   const [caseData, setCaseData] = useState<any[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [showLegalTemplate, setShowLegalTemplate] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showFamousCases, setShowFamousCases] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<Array<{
+    id: string;
+    title: string;
+    timestamp: Date;
+  }>>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Save conversation to history when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      const firstUserMessage = messages.find(msg => msg.role === 'user');
+      if (firstUserMessage) {
+        const conversationId = uuidv4();
+        const title = firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '');
+        
+        setConversationHistory(prev => {
+          const existing = prev.find(conv => conv.title === title);
+          if (!existing) {
+            return [{
+              id: conversationId,
+              title,
+              timestamp: new Date()
+            }, ...prev.slice(0, 19)]; // Keep only last 20 conversations
+          }
+          return prev;
+        });
+      }
     }
   }, [messages]);
 
@@ -148,7 +179,18 @@ export function AIChat() {
       setCaseData(cases);
       setShowResults(true);
       
-      const prompt = `Please analyze these landmark cases and their implications. Format your response with clear titles, bullet points, and proper line breaks for readability: ${cases.map(c => c.title).join(', ')}`;
+      const prompt = `Please analyze these landmark cases and their implications. Format your response with clear titles, bullet points, and proper line breaks for readability: ${cases.map(c => c.title).join(', ')}
+
+Please format your response with:
+- Clear titles using ## for main headings and ### for subheadings
+- Bullet points using * or - for lists
+- Proper line breaks between sections
+- Bold text using **text** for emphasis
+- Numbered lists when appropriate
+- Clear structure that's easy to read and scan
+
+Make your response well-organized and visually appealing.`;
+
       const result = await geminiModel.generateContent(prompt);
       const analysis = await result.response.text();
       
@@ -180,7 +222,18 @@ export function AIChat() {
     setShowLegalTemplate(true);
     try {
       setIsLoading(true);
-      const prompt = "Please suggest appropriate legal templates based on common legal needs and provide guidance on their usage. Format your response with clear titles, bullet points, and proper line breaks for readability.";
+      const prompt = `Please suggest appropriate legal templates based on common legal needs and provide guidance on their usage. Format your response with clear titles, bullet points, and proper line breaks for readability.
+
+Please format your response with:
+- Clear titles using ## for main headings and ### for subheadings
+- Bullet points using * or - for lists
+- Proper line breaks between sections
+- Bold text using **text** for emphasis
+- Numbered lists when appropriate
+- Clear structure that's easy to read and scan
+
+Make your response well-organized and visually appealing.`;
+
       const result = await geminiModel.generateContent(prompt);
       const analysis = await result.response.text();
       
@@ -271,170 +324,168 @@ Make your response well-organized and visually appealing.`;
     }
   };
 
+  const handleConversationSelect = (conversationId: string) => {
+    // In a real app, you would load the conversation from storage
+    console.log('Loading conversation:', conversationId);
+    setIsSidebarOpen(false);
+  };
+
   return (
-    <div className="flex flex-col sm:flex-row p-0 gap-1">
-      <div className="flex-1 w-full sm:w-4/5 bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="p-4 border-b flex justify-between items-center">
-          <h2 className="text-lg font-semibold">AI Chat</h2>
-        </div>
+    <>
+      <Sidebar
+        isOpen={isSidebarOpen}
+        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+        onTemplateSelect={() => {
+          setShowLegalTemplate(true);
+          setIsSidebarOpen(false);
+        }}
+        onFamousCasesSelect={() => {
+          setShowFamousCases(true);
+          setIsSidebarOpen(false);
+        }}
+        conversationHistory={conversationHistory}
+        onConversationSelect={handleConversationSelect}
+      />
 
-        <div ref={chatContainerRef} className="h-[400px] sm:h-[500px] overflow-y-auto p-4 space-y-4">
-          {messages.map((message) => (
-            <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] rounded-lg p-3 ${
-                message.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-800'
-              }`}>
-                <div className="prose prose-sm max-w-none">
-                  {message.role === 'assistant' ? (
-                    <div dangerouslySetInnerHTML={{
-                      __html: message.content
-                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/## (.*?)(\n|$)/g, '<h2 class="text-lg font-bold mt-4 mb-2">$1</h2>')
-                        .replace(/### (.*?)(\n|$)/g, '<h3 class="text-md font-semibold mt-3 mb-2">$1</h3>')
-                        .replace(/^\* (.*?)$/gm, '<li>$1</li>')
-                        .replace(/^- (.*?)$/gm, '<li>$1</li>')
-                        .replace(/(<li>.*<\/li>)/gs, '<ul class="list-disc ml-4 mb-2">$1</ul>')
-                        .replace(/^\d+\. (.*?)$/gm, '<li>$1</li>')
-                        .replace(/\n/g, '<br>')
-                    }} />
-                  ) : (
-                    message.content
-                  )}
-                </div>
-              </div>
+      <FamousCases
+        isOpen={showFamousCases}
+        onClose={() => setShowFamousCases(false)}
+      />
+
+      <div className="flex flex-col sm:flex-row p-0 gap-1">
+        <div className="flex-1 w-full sm:w-4/5 bg-white rounded-lg shadow-md overflow-hidden">
+          <div className="p-4 border-b flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsSidebarOpen(true)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Open menu"
+              >
+                <Menu className="w-5 h-5 text-gray-600" />
+              </button>
+              <h2 className="text-lg font-semibold">AI Chat</h2>
             </div>
-          ))}
-
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-gray-300 rounded-lg p-3">
-                <div className="typing-indicator">
-                  <div className="dot"></div>
-                  <div className="dot"></div>
-                  <div className="dot"></div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg">
-              <AlertCircle className="w-5 h-5" />
-              <p className="text-sm">{error}</p>
-            </div>
-          )}
-        </div>
-
-        {/* {file && (
-          <FileUploadPreview 
-            file={file} 
-            onRemove={() => setFile(null)} 
-            onAnalysis={handleAnalysis}
-          />
-        )} */}
-
-        {/* <div className="flex flex-wrap gap-1 justify-center items-center p-4 bg-gray-50 border-t border-gray-200">
-          <div className="flex gap-2">
-            <button
-              onClick={handleLegalTemplate}
-              className="flex items-center gap-1 bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <FilePlus className="w-4 h-4" />
-              <span>Templates</span>
-            </button>
-
-            <button
-              onClick={handleFetchCases}
-              className="flex items-center gap-1 bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>Case</span>
-            </button>
-
-            <label className="flex items-center gap-2 bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
-              <FileText className="w-4 h-4" />
-              <span>Upload</span>
-              <input 
-                type="file" 
-                className="hidden" 
-                onChange={handleFileChange} 
-                accept=".txt,.doc,.docx,.pdf"
-              />
-            </label>
           </div>
-        </div> */}
 
-        <div className="flex items-center gap-3 border-t p-4 bg-white">
-          <label className="cursor-pointer p-2 hover:bg-gray-100 rounded-full transition-colors">
+          <div ref={chatContainerRef} className="h-[400px] sm:h-[500px] overflow-y-auto p-4 space-y-4">
+            {messages.map((message) => (
+              <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] rounded-lg p-3 ${
+                  message.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-800'
+                }`}>
+                  <div className="prose prose-sm max-w-none">
+                    {message.role === 'assistant' ? (
+                      <div dangerouslySetInnerHTML={{
+                        __html: message.content
+                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                          .replace(/## (.*?)(\n|$)/g, '<h2 class="text-lg font-bold mt-4 mb-2">$1</h2>')
+                          .replace(/### (.*?)(\n|$)/g, '<h3 class="text-md font-semibold mt-3 mb-2">$1</h3>')
+                          .replace(/^\* (.*?)$/gm, '<li>$1</li>')
+                          .replace(/^- (.*?)$/gm, '<li>$1</li>')
+                          .replace(/(<li>.*<\/li>)/gs, '<ul class="list-disc ml-4 mb-2">$1</ul>')
+                          .replace(/^\d+\. (.*?)$/gm, '<li>$1</li>')
+                          .replace(/\n/g, '<br>')
+                      }} />
+                    ) : (
+                      message.content
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-300 rounded-lg p-3">
+                  <div className="typing-indicator">
+                    <div className="dot"></div>
+                    <div className="dot"></div>
+                    <div className="dot"></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg">
+                <AlertCircle className="w-5 h-5" />
+                <p className="text-sm">{error}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 border-t p-4 bg-white">
+            <label className="cursor-pointer p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <input
+                type="file"
+                accept=".txt,.pdf,.doc,.docx"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <FilePlus className="w-5 h-5 text-gray-600 hover:text-blue-600" />
+            </label>
+            
             <input
-              type="file"
-              accept=".txt,.pdf,.doc,.docx"
-              onChange={handleFileChange}
-              className="hidden"
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+              placeholder="Ask a question or upload a document..."
+              className="flex-1 border border-gray-300 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <FilePlus className="w-5 h-5 text-gray-600 hover:text-blue-600" />
-          </label>
-          
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+            
+            <button
+              type="button"
+              onClick={handleVoiceInput}
+              className={`p-2 rounded-full transition-colors ${
+                isListening 
+                  ? 'bg-red-100 text-red-600' 
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title="Voice input"
+            >
+              <Mic className="w-5 h-5" />
+            </button>
+            
+            <button
+              onClick={(e) => {
                 e.preventDefault();
                 handleSubmit(e);
-              }
-            }}
-            placeholder="Ask a question or upload a document..."
-            className="flex-1 border border-gray-300 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-          
-          <button
-            type="button"
-            onClick={handleVoiceInput}
-            className={`p-2 rounded-full transition-colors ${
-              isListening 
-                ? 'bg-red-100 text-red-600' 
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-            title="Voice input"
-          >
-            <Mic className="w-5 h-5" />
-          </button>
-          
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              handleSubmit(e);
-            }}
-            disabled={isLoading || !input.trim()}
-            className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="Send message"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+              }}
+              disabled={isLoading || !input.trim()}
+              className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Send message"
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
+        <div className="flex-1 bg-white rounded-lg shadow-md p-4 mt-0 sm:mt-0">
+          <h2 className="text-lg font-semibold mb-4">Web Search Results</h2>
+          <WebSearchResults searchQuery={searchQuery} />
+        </div>
+
+        {showLegalTemplate && (
+          <LegalDraftingPanel
+            templates={legalTemplateButton}
+            onClose={() => setShowLegalTemplate(false)}
+            onSelectTemplate={() => {}}
+          />
+        )}
+
+        {showResults && (
+          <CaseLawResults
+            cases={caseData}
+            onClose={() => setShowResults(false)}
+          />
+        )}
       </div>
-
-      <div className="flex-1 bg-white rounded-lg shadow-md p-4 mt-0 sm:mt-0">
-        <h2 className="text-lg font-semibold mb-4">Web Search Results</h2>
-        <WebSearchResults searchQuery={searchQuery} />
-      </div>
-
-      {showLegalTemplate && (
-        <LegalDraftingPanel
-          templates={legalTemplateButton}
-          onClose={() => setShowLegalTemplate(false)}
-          onSelectTemplate={() => {}}
-        />
-      )}
-
-      {showResults && (
-        <CaseLawResults
-          cases={caseData}
-          onClose={() => setShowResults(false)}
-        />
-      )}
-    </div>
+    </>
   );
 }
